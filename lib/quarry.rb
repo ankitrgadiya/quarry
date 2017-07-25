@@ -25,6 +25,9 @@ ARCHITECTURE = `uname -m`.strip
 GEM_DIR = Gem.default_dir
 GEM_EXTENSION_DIR = File.join(GEM_DIR, 'extensions', Gem::Platform.local.to_s, Gem.extension_api_version)
 
+# gems that already exist as packages in the official repositories, and should not be built again.
+OFFICIAL_PACKAGES = `pacman -Slq | grep ^ruby-|cut -d- -f2-`.split(' ')
+
 # gems that conflict with ruby package, 'ruby' already provides it
 # Some gems are bundled:
 #   https://github.com/ruby/ruby/blob/trunk/gems/bundled_gems
@@ -558,6 +561,7 @@ def build_packages(packages_to_generate, existing_packages)
   repo_modified = false
 
   while pkg = packages_to_generate.last do
+    pkgname = pkg.compact.join('-')
     version = slot_to_version(*pkg)
     spec = package_spec(pkg[0], version)
     upfront_deps = [] # packages should be processed before 'pkg'
@@ -565,7 +569,11 @@ def build_packages(packages_to_generate, existing_packages)
       s = dependency_to_slot(d)
       key = [d.name, s]
 
-      if packages_to_generate.include?(key)
+      depname = key.compact.join('-')
+
+      if OFFICIAL_PACKAGES.include?(depname)
+        # skipping package because it is in the official repos
+      elsif packages_to_generate.include?(key)
         # if dependency has to be generated, do it before 'pkg'
         packages_to_generate.delete(key)
         upfront_deps << key
@@ -588,8 +596,10 @@ def build_packages(packages_to_generate, existing_packages)
 
     packages_to_generate.pop
 
-    existing_packages[pkg] = {} unless existing_packages[pkg] # create a stub for the existing package
-    build_package(*pkg, existing_packages[pkg])
+    if not OFFICIAL_PACKAGES.include?(pkgname)
+        existing_packages[pkg] = {} unless existing_packages[pkg] # create a stub for the existing package
+        build_package(*pkg, existing_packages[pkg])
+    end
     repo_modified = true
 
     # sync to chroot as the next package might require this update
